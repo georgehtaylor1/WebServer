@@ -33,6 +33,10 @@ int main(int *argc, char **argv){
 
   printf("Connection success\n");
 
+  char recBuff[2000];
+  int count = recv(new_socket, recBuff, 2000, 0);
+  printf("%s\n", recBuff);
+  
   return 0;
   
 
