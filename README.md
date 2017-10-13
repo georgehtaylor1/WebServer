@@ -15,3 +15,28 @@ Settled on architecture:
 How do http requsts get served to the correct child thread? ephemeral ports?
 
 Starting with socket preparatory 1
+
+
+## 03/10/17
+
+Successfully opening and closing socket (tested with telnet)
+
+[15:08]
+
+Successfully print get request
+
+## 07/10/17
+
+Setup structs for HTTP requests, responses and tcp clients.
+
+Created framework for functions that produce a directory listing and for serving files
+
+Settled on an implementation which uses fork() and a system timer + request count which allows connections to be kept
+alive - Still need to work out how this will work when daemons are considered as it will require a host process which
+spins off the child processes
+
+## 13/10/17
+
+The server will now examine the URI of a GET request and return a directory listing for that directory - this does not currently work for subdirectories as it needs to be combined with the referrer to determine the correct local path.
+
+Reasonable temporary values are being used for the various buffers at all times. THey will be replaced by more rigourous values a thte end of the project.
