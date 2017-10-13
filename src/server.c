@@ -102,13 +102,13 @@ int recieve(struct Client *client, char *buff) {
 int serveRequest(struct Client *client, struct HTTP_request *request) {
 
     printf("%d: Creating response...\n", getpid());
-    struct HTTP_response *response = directoryListing(request);
-    printf("%d: Created response\n", getpid());
-    sleep(2);
-    put_response(client, response);
+    int success = serve_file(client, request);
+    //printf("%d: Created response\n", getpid());
+    //sleep(2);
+    //put_response(client, response);
     printf("Sent response\n");
     free(request);
-    free(response);
+    // free(response);
 
     return 0;
 }
