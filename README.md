@@ -40,3 +40,7 @@ spins off the child processes
 The server will now examine the URI of a GET request and return a directory listing for that directory - this does not currently work for subdirectories as it needs to be combined with the referrer to determine the correct local path.
 
 Reasonable temporary values are being used for the various buffers at all times. THey will be replaced by more rigourous values a thte end of the project.
+
+[15:09]
+
+Can now serve sub directories and returns error message in response when could not locate directory, needs updating to proper HTTP error. Next task is to serve files.
