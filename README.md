@@ -48,5 +48,9 @@ Can now serve sub directories and returns error message in response when could n
 [23:04]
 
 Performed a fairly major restructuring, if a directory is referenced by the URI it will return a redirect response to an index.html in that directory
-If an index.html is referenced that doesn't exist then a directory listing page will be presented (This will probably end up being extended to referencing any file that doesn't exist in a directory
+If an index.html is referenced that doesn't exist then a directory listing page will be presented (This will probably end up being extended to referencing any file that doesn't exist in a directory)
 This seems to be working fairly well but there is some funny business occuring when testing in google chrome. More debugging needed
+
+## 17/10/17
+
+Google chrome was playing up (unrelated) so now testing in firefox. Successfully serving directory listing except if the URI contains a space (%20).

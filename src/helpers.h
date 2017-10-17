@@ -19,9 +19,11 @@ struct HTTP_request * parse_request(char *request, int i);
 
 char * extract_header_item(char *request, char *identifier);
 
-int serve_file(struct Client *client, struct HTTP_request *request);
+int serve(struct Client *client, struct HTTP_request *request);
 
 int serve_directory_listing(struct Client *client, struct HTTP_request *request);
+
+int serve_file(struct Client * client, struct HTTP_request * resquest);
 
 struct HTTP_response * file(struct HTTP_request *);
 

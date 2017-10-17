@@ -27,7 +27,8 @@ struct HTTP_request *parse_request(char *request, int buffLen) {
 
     // Extract the host
     char *host = extract_header_item(request, "Host");
-    result->host = host;
+    if(host != NULL)
+        result->host = host;
 
     // Extract Referer
     char *referer = extract_header_item(request, "Referer");
@@ -35,16 +36,16 @@ struct HTTP_request *parse_request(char *request, int buffLen) {
         result->referer = referer;
 
     // Extract fully qualified URI
-    if (result->referer != NULL) {
-        char *refererHostPtr = strstr(result->referer, result->host);
-        char *refererURI = refererHostPtr + strlen(result->host);
-        char *FQrequestURI = malloc(sizeof(char) * (strlen(refererURI) + strlen(result->requestURI) + 1));
-        strcpy(FQrequestURI, refererURI);
-        strcat(FQrequestURI, result->requestURI);
-        result->FQrequestURI = FQrequestURI;
-    } else {
-        result-> FQrequestURI = result->requestURI;
-    }
+//    if (result->referer != NULL) {
+//        char *refererHostPtr = strstr(result->referer, result->host);
+//        char *refererURI = refererHostPtr + strlen(result->host);
+//        char *FQrequestURI = malloc(sizeof(char) * (strlen(refererURI) + strlen(result->requestURI) + 1));
+//        strcpy(FQrequestURI, refererURI);
+//        strcat(FQrequestURI, result->requestURI);
+//        result->FQrequestURI = FQrequestURI;
+//    } else {
+//        result-> FQrequestURI = result->requestURI;
+//    }
 
     return result;
 }
@@ -86,14 +87,14 @@ int free_response(struct HTTP_response *response) {
     return 0;
 }
 
-int serve_file(struct Client *client, struct HTTP_request * request){
+int serve(struct Client *client, struct HTTP_request * request){
 
     char dir[1024];
     strcpy(dir, "/home/george");
     strcat(dir, request->requestURI);
     printf("Dir: %s\n", dir);
     if(is_directory(dir) != 0){
-        return redirect(client, "index.html");
+        return temp_redirect(client, "index.html");
     }
 
     if(file_exists(dir)) {
@@ -139,17 +140,19 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request)
             char line[2048] = "";
 
             char path[1024], FQpath[1024];
-            sprintf(path, "%s/%s", request->requestURI, ep->d_name);
+
+            sprintf(path, "%s%s", dir, ep->d_name);
+
             sprintf(FQpath, "/home/george%s", path);
             printf("Adding path: %s\n", path);
             strcat(line, "<a href='");
             strcat(line, ep->d_name);
-            if(is_file(FQpath) == 0){
+            if(is_directory(path)){
                 strcat(line, "/index.html");
             }
             strcat(line, "'>");
             strcat(line, ep->d_name);
-            if(is_file(FQpath) == 0){
+            if(is_directory(path)){
                 strcat(line, "/");
             }
             strcat(line, "</a><br />");
@@ -164,7 +167,7 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request)
         closedir(dp);
     } else {
         perror("Couldn't open directory");
-        return error_404();
+        return internal_server_error(client);
     }
 
     printf("Finished generating HTML\n");
@@ -173,11 +176,12 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request)
     write(client->socket, "HTTP/1.1 200 OK\n\n", 17);
     write(client->socket, responseHTML, strlen(responseHTML) + 1);
 
-//    response->content = responseHTML;
-//    response->statusCode = "200";
-//    response->reasonPhrase = "OK";
     printf("%d: Should return!\n", getpid());
     return response;
+}
+
+int serve_file(struct Client * client, struct HTTP_request * resquest){
+    write(client->socket, "HTTP/1.1 200 OK\n", 17);
 }
 
 int is_file(char *path){
@@ -214,10 +218,17 @@ struct HTTP_response *error_404(){
     response->content = "The requested resource could not be located";
 }
 
-int redirect(struct Client *client, char *red){
+int internal_server_error(struct Client *client){
+    write(client->socket, "HTTP/1.1 500 Internal Server Error\n", 37);
+    write(client->socket, "\n\n", 2);
+    return 1;
+}
+
+int temp_redirect(struct Client *client, char *red){
     printf("Redirected\n");
-    write(client->socket, "HTTP/1.1 301 Moved Permanently\n\n", 32);
+    write(client->socket, "HTTP/1.1 302 Found\n", 19);
     write(client->socket, "Location: ", 10);
     write(client->socket, red, strlen(red) + 1);
     write(client->socket, "\n\n", 2);
+    return 0;
 }
