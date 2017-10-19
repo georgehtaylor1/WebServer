@@ -101,37 +101,10 @@ int recieve(struct Client *client, char *buff) {
 
 int serveRequest(struct Client *client, struct HTTP_request *request) {
 
-    printf("%d: Creating response...\n", getpid());
-    int success = serve(client, request);
-    printf("Sent response\n");
-    free(request);
+    serve(client, request);
+    free_request(request);
 
     return 0;
-}
-
-int put_response(struct Client *client, struct HTTP_response *response){
-
-    char result[8096];
-
-    strcpy(result, "HTTP/1.1 ");
-    strcat(result, response->statusCode);
-    strcat(result, " ");
-    strcat(result, response->reasonPhrase);
-    //strcat(result, "\r\n");
-    strcat(result, "\nContent-Length: ");
-
-    char snum[6];
-    sprintf(snum, "%d", strlen(response->content) + 1);
-
-    strcat(result, snum);
-
-    strcat(result, "\nContent-Type: text/html\n\n");
-    strcat(result, response->content);
-
-    printf("Returned: \n%s\n", result);
-
-    write(client->socket, result, strlen(result) + 1);
-
 }
 
 int closeClient(struct Client *client) {

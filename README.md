@@ -23,7 +23,7 @@ Successfully opening and closing socket (tested with telnet)
 
 [15:08]
 
-Successfully print get request
+Su/ccessfully print get request
 
 ## 07/10/17
 
@@ -54,3 +54,9 @@ This seems to be working fairly well but there is some funny business occuring w
 ## 17/10/17
 
 Google chrome was playing up (unrelated) so now testing in firefox. Successfully serving directory listing except if the URI contains a space (%20).
+
+## 19/10/17
+
+The server now successfully serves files and handles errors in a far better way.
+I've done a lot of tidying up of the code but there's more to be done.
+Next task is to attempt some of the extensions and set the process up as a daemon.

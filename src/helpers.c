@@ -7,6 +7,8 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+#define MAX_READ_BUFFER 2048
+
 struct HTTP_request *parse_request(char *request, int buffLen) {
     struct HTTP_request *result = malloc(sizeof(struct HTTP_request));
 
@@ -34,18 +36,6 @@ struct HTTP_request *parse_request(char *request, int buffLen) {
     char *referer = extract_header_item(request, "Referer");
     if (referer != NULL)
         result->referer = referer;
-
-    // Extract fully qualified URI
-//    if (result->referer != NULL) {
-//        char *refererHostPtr = strstr(result->referer, result->host);
-//        char *refererURI = refererHostPtr + strlen(result->host);
-//        char *FQrequestURI = malloc(sizeof(char) * (strlen(refererURI) + strlen(result->requestURI) + 1));
-//        strcpy(FQrequestURI, refererURI);
-//        strcat(FQrequestURI, result->requestURI);
-//        result->FQrequestURI = FQrequestURI;
-//    } else {
-//        result-> FQrequestURI = result->requestURI;
-//    }
 
     return result;
 }
@@ -78,15 +68,6 @@ int free_request(struct HTTP_request *request) {
     return 0;
 }
 
-int free_response(struct HTTP_response *response) {
-    //TODO: Needs check for invalid free
-    free(response->content);
-    free(response->reasonPhrase);
-    free(response->statusCode);
-    free(response);
-    return 0;
-}
-
 int serve(struct Client *client, struct HTTP_request * request){
 
     char dir[1024];
@@ -99,19 +80,18 @@ int serve(struct Client *client, struct HTTP_request * request){
 
     if(file_exists(dir)) {
         // Serve file
-        perror("File found");
+        serve_file(client, dir);
     } else {
         int dirLen = strlen(dir);
-        printf("Last ten chars: %s\n", dir + dirLen - 10);
         if(strcmp("index.html", dir + dirLen - 10) == 0)
             serve_directory_listing(client, request);
         else
-            perror("Something funny occurred...");
+            return error_404(client);
     }
+    return 0;
 }
 
 int serve_directory_listing(struct Client *client, struct HTTP_request *request) {
-    struct HTTP_response *response = malloc(sizeof(struct HTTP_response));
 
     int length = 100;
     char *responseHTML = malloc(sizeof(char) * length);
@@ -126,7 +106,6 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request)
 
     if(strcmp("index.html", dir + dirLen - 10) == 0) {
         dir[dirLen - 10] = '\0';
-        printf("Stripped dir: %s\n", dir);
     }
 
     DIR *dp;
@@ -144,7 +123,6 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request)
             sprintf(path, "%s%s", dir, ep->d_name);
 
             sprintf(FQpath, "/home/george%s", path);
-            printf("Adding path: %s\n", path);
             strcat(line, "<a href='");
             strcat(line, ep->d_name);
             if(is_directory(path)){
@@ -163,31 +141,51 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request)
             }
             strcat(responseHTML, line);
         }
-        printf("Closing dir\n");
         closedir(dp);
     } else {
         perror("Couldn't open directory");
         return internal_server_error(client);
     }
 
-    printf("Finished generating HTML\n");
     strcat(responseHTML, "</body></html>");
 
     write(client->socket, "HTTP/1.1 200 OK\n\n", 17);
     write(client->socket, responseHTML, strlen(responseHTML) + 1);
 
-    printf("%d: Should return!\n", getpid());
-    return response;
+    return 0;
 }
 
-int serve_file(struct Client * client, struct HTTP_request * resquest){
+int serve_file(struct Client * client, char *file){
     write(client->socket, "HTTP/1.1 200 OK\n", 17);
-}
+    write(client->socket, "\n\n", 2);
 
-int is_file(char *path){
-    struct stat pathStat;
-    stat(path, &pathStat);
-    return S_ISREG(pathStat.st_mode);
+    FILE *f = fopen(file, "r");
+    if (f < 0){
+        perror("Failed to open file");
+        return 1;
+    }
+
+    fseek(f, 0, SEEK_END);
+    int length = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char buffer[MAX_READ_BUFFER];
+    int bytes_read = 0;
+    char *bufferPtr;
+
+    while((bytes_read = fread(buffer, sizeof(char), MAX_READ_BUFFER, f)) > 0){
+        int bytes_written = 0;
+        bufferPtr = buffer;
+        while(bytes_written < bytes_read){
+            bytes_read -= bytes_written;
+            bufferPtr += bytes_written;
+            bytes_written = write(client->socket, bufferPtr, bytes_read);
+        }
+    }
+    fclose(f);
+
+    printf("Successfully sent %s\n", file);
+    return 0;
 }
 
 int is_directory(char *path){
@@ -201,21 +199,11 @@ int file_exists(char *path){
     return stat(path, &pathStat) == 0;
 }
 
-struct HTTP_response *file(struct HTTP_request *request) {
-    struct HTTP_response *response;
-
-    /**
-     * Serve a file to the client
-     */
-
-    return response;
-}
-
-struct HTTP_response *error_404(){
-    struct HTTP_response *response = malloc(sizeof(response));
-    response->statusCode = "404";
-    response->reasonPhrase = "Not Found";
-    response->content = "The requested resource could not be located";
+struct HTTP_response *error_404(struct Client *client){
+    write(client->socket, "HTTP/1.1 404 Not Found\n", 23);
+    write(client->socket, "\n\n", 2);
+    write(client->socket, "The requested resource could not be located", 43);
+    return 1;
 }
 
 int internal_server_error(struct Client *client){

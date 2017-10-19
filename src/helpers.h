@@ -9,12 +9,6 @@ struct HTTP_request {
     char* content;
 };
 
-struct HTTP_response {
-    char* statusCode;
-    char* reasonPhrase;
-    char* content;
-};
-
 struct HTTP_request * parse_request(char *request, int i);
 
 char * extract_header_item(char *request, char *identifier);
@@ -23,9 +17,10 @@ int serve(struct Client *client, struct HTTP_request *request);
 
 int serve_directory_listing(struct Client *client, struct HTTP_request *request);
 
-int serve_file(struct Client * client, struct HTTP_request * resquest);
+int serve_file(struct Client * client, char *file);
 
 struct HTTP_response * file(struct HTTP_request *);
 
+int free_request(struct HTTP_request * request);
 // Error functions
-struct HTTP_response *error_404();
+struct HTTP_response *error_404(struct Client *client);
