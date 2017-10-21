@@ -11,12 +11,14 @@
 
 #define MAX_READ_BUFFER 2048
 
-struct HTTP_request *parse_request(char *request, int buffLen) {
+struct HTTP_request *parse_request(struct Client *client, char *request, int buffLen) {
     struct HTTP_request *result = malloc(sizeof(struct HTTP_request));
 
     // What type of request is it?
     if (strncmp(request, "GET", 3) == 0) {
         result->requestMethod = GET;
+    } else {
+        return response_501(client);
     }
 
     // Extract the request URI
@@ -80,7 +82,6 @@ int serve(struct Client *client, struct HTTP_request *request) {
     }
 
     if (file_exists(dir)) {
-        // Serve file
         serve_file(client, dir);
     } else {
         int dirLen = strlen(dir);
@@ -162,7 +163,7 @@ int serve_file(struct Client *client, char *file) {
     FILE *f = fopen(file, "r");
     if (f < 0) {
         perror("Failed to open file");
-        return 1;
+        return internal_server_error(client);
     }
 
     fseek(f, 0, SEEK_END);
@@ -216,6 +217,12 @@ int error_404(struct Client *client) {
 
 int internal_server_error(struct Client *client) {
     write(client->socket, "HTTP/1.1 500 Internal Server Error\n", 37);
+    write(client->socket, "\n\n", 2);
+    return 1;
+}
+
+int response_501(struct Client *client) {
+    write(client->socket, "HTTP/1.1 501 Not Implemented\n", 29);
     write(client->socket, "\n\n", 2);
     return 1;
 }

@@ -12,7 +12,7 @@ struct HTTP_request {
     char *content;
 };
 
-struct HTTP_request *parse_request(char *request, int i);
+struct HTTP_request *parse_request(struct Client *client, char *request, int i);
 
 char *extract_header_item(char *request, char *identifier);
 
@@ -30,6 +30,8 @@ int free_request(struct HTTP_request *request);
 
 // Error functions
 int error_404(struct Client *client);
+
+int response_501(struct Client *client);
 
 int temp_redirect(struct Client *client, char *red);
 
