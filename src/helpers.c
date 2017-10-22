@@ -18,7 +18,8 @@ struct HTTP_request *parse_request(struct Client *client, char *request, int buf
     if (strncmp(request, "GET", 3) == 0) {
         result->requestMethod = GET;
     } else {
-        return response_501(client);
+        response_501(client);
+        return NULL;
     }
 
     // Extract the request URI
@@ -40,6 +41,11 @@ struct HTTP_request *parse_request(struct Client *client, char *request, int buf
     char *referer = extract_header_item(request, "Referer");
     if (referer != NULL)
         result->referer = referer;
+
+    // Extract keep-alive
+    char *keep_alive = extract_header_item(request, "Connection");
+    if (keep_alive != NULL)
+        result->keep_alive = strcmp(keep_alive, "keep-alive");
 
     return result;
 }
@@ -106,9 +112,13 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request)
     strcat(dir, request->requestURI);
     int dirLen = strlen(dir);
 
+    printf("dir: %s\n", dir);
+
     if (strcmp("index.html", dir + dirLen - 10) == 0) {
         dir[dirLen - 10] = '\0';
     }
+
+    printf("dir: %s\n", dir);
 
     DIR *dp;
     dp = opendir(dir);
@@ -116,7 +126,7 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request)
     struct dirent *ep;
 
     if (dp != NULL) {
-        while (ep = readdir(dp)) {
+        while ((ep = readdir(dp)) != NULL) {
             // TODO: Fix this to use sprintf
             char line[2048] = "";
 
@@ -144,13 +154,27 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request)
         }
         closedir(dp);
     } else {
+        if(errno == ENOENT){
+            perror("Not a valid directory");
+            return error_404(client);
+        }
+        if (errno == EACCES){
+            perror("Illegal file access");
+            return response_500(client);
+            // TODO: Return correct response
+        }
         perror("Couldn't open directory");
-        return internal_server_error(client);
+        return response_500(client);
     }
 
     strcat(responseHTML, "</body></html>");
 
-    write(client->socket, "HTTP/1.1 200 OK\n\n", 17);
+    write(client->socket, "HTTP/1.1 200 OK\n", 16);
+
+    char contentLength[128];
+    sprintf(contentLength, "Content-length: %zu\n\n", strlen(responseHTML));
+
+    write(client->socket, contentLength, strlen(contentLength));
     write(client->socket, responseHTML, strlen(responseHTML) + 1);
 
     return 0;
@@ -161,14 +185,10 @@ int serve_file(struct Client *client, char *file) {
     write(client->socket, "\n\n", 2);
 
     FILE *f = fopen(file, "r");
-    if (f < 0) {
+    if (f == NULL) {
         perror("Failed to open file");
-        return internal_server_error(client);
+        return response_500(client);
     }
-
-    fseek(f, 0, SEEK_END);
-    int length = ftell(f);
-    fseek(f, 0, SEEK_SET);
 
     char buffer[MAX_READ_BUFFER];
     int bytes_read = 0;
@@ -215,7 +235,7 @@ int error_404(struct Client *client) {
     return 1;
 }
 
-int internal_server_error(struct Client *client) {
+int response_500(struct Client *client) {
     write(client->socket, "HTTP/1.1 500 Internal Server Error\n", 37);
     write(client->socket, "\n\n", 2);
     return 1;

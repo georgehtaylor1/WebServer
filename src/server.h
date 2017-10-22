@@ -5,13 +5,13 @@ struct Client {
     int id;
     int socket;
     struct sockaddr sock_addr;
-    int client_length;
+    socklen_t client_length;
 };
 
 
 char * server_root_dir;
 
-int recieve(struct Client *client, char *buff);
+int receive(struct Client *client, char *buff);
 
 int serveClient(struct Client *client);
 

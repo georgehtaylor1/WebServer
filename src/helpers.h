@@ -10,7 +10,10 @@ struct HTTP_request {
     char *host;
     char *referer;
     char *content;
+    int keep_alive;
 };
+
+struct Client;
 
 struct HTTP_request *parse_request(struct Client *client, char *request, int i);
 
@@ -35,4 +38,4 @@ int response_501(struct Client *client);
 
 int temp_redirect(struct Client *client, char *red);
 
-int internal_server_error(struct Client *client);
+int response_500(struct Client *client);

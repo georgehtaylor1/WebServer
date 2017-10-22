@@ -60,3 +60,9 @@ Google chrome was playing up (unrelated) so now testing in firefox. Successfully
 The server now successfully serves files and handles errors in a far better way.
 I've done a lot of tidying up of the code but there's more to be done.
 Next task is to attempt some of the extensions and set the process up as a daemon.
+
+## 22/10/17
+
+With more time I'm glad to have the opportunity to make the solution far better!
+The server has been cleaned up hugely and a lot of additional error checking has been intriduced (although still not enough).
+The receipt of messages now works by bloking until a poll() indicates that there are bytes to be read from the socket. The server will then read from the socket until a 

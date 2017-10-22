@@ -4,19 +4,47 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <poll.h>
+#include <signal.h>
 #include "helpers.h"
 #include "server.h"
 
-const int recvBuffSize = 2048;
+#define RECVBUFFSIZE 16
+#define CONNECTION_TIMEOUT 30000
+#define CONNECTION_REQUEST_LIMIT 10
+
+char excessBuffer[RECVBUFFSIZE];
+int excessLength = 0;
+
+struct Client *new_client = NULL;
+int sock_desc;
+
+void sig_handler(int signo) {
+    if (signo == SIGINT)
+        printf("Killing server\n");
+
+    closeClient(new_client);
+    close(sock_desc);
+
+    printf("Process terminated\n");
+    exit(0);
+}
+
+int error(char *msg) {
+    perror(msg);
+    return 1;
+}
 
 int main(int argc, char **argv) {
 
-    if(argc < 2){
+    if (argc < 2) {
         perror("Insufficient paramters supplied, usage: ./server <-d?> <port> <web directory>");
         return 1;
     }
 
-    if(strcmp(argv[1], "-d") == 0 && argc == 4) {
+    if (signal(SIGINT, sig_handler) == SIG_ERR) return error("Can't catch SIGINT");
+
+    if (strcmp(argv[1], "-d") == 0 && argc == 4) {
 
         // Set the process up to run as a daemon
         pid_t daemonid, sid;
@@ -41,22 +69,15 @@ int main(int argc, char **argv) {
         close(STDOUT_FILENO);
         close(STDERR_FILENO);
 
-    } else if (argc != 3){
-        perror("Insufficient paramters supplied, usage: ./server <-d?> <port> <web directory>");
-        return 1;
-    }
+    } else if (argc != 3)
+        return error("Insufficient parameters supplied, usage: ./server <-d?> <port> <web directory>");
 
     int port = atoi(argv[1]);
     server_root_dir = argv[2];
 
-    printf("Not even here\n");
-
     int counter = 0;
-    int sock_desc = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock_desc == -1) {
-        printf("Failed to create socket\n");
-        return 1;
-    }
+    sock_desc = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock_desc == -1) return error("Failed to creeate socket");
 
     // Setup the host listener
     struct sockaddr_in server;
@@ -76,7 +97,6 @@ int main(int argc, char **argv) {
 
     while (server_alive == 1) {
         // Connect a new client
-        struct Client *new_client;
         new_client = malloc(sizeof(struct Client));
         new_client->socket = accept(sock_desc, &new_client->sock_addr, &new_client->client_length);
         new_client->id = counter++;
@@ -89,9 +109,6 @@ int main(int argc, char **argv) {
             closeClient(new_client);
         }
     }
-
-    return 0;
-
 }
 
 /**
@@ -102,45 +119,97 @@ int main(int argc, char **argv) {
  */
 int serveClient(struct Client *client) {
     printf("%d: Serving client %d\n", getpid(), client->id);
-    if (client->socket < 0) {
-        printf("Connection Failed\n");
-        return 1;
-    }
+
+    if (client->socket < 0) return error("Connection failed");
 
     printf("Connection success\n");
 
-    int connectionAlive = 5;
-    char *recBuff = malloc(sizeof(char) * recvBuffSize);
+    int connectionAlive = CONNECTION_REQUEST_LIMIT;
 
-    //while (connectionAlive --> 0) {
-    printf("Waiting to receive\n");
-    int buffLen = recieve(client, recBuff);
-    printf("\nReceived\n%s\nparsing request... \n", recBuff);
-    struct HTTP_request *request = parse_request(client, recBuff, buffLen);
-    printf("Parsed\n");
-    serve(client, request);
-    free_request(request);
-    //}
-    free(recBuff);
+    while (connectionAlive > 0) {
+
+        char *recBuff = malloc(sizeof(char) * RECVBUFFSIZE);
+
+        printf("Waiting to receive\n");
+
+        struct pollfd ufds[1];
+        ufds[0].fd = client->socket;
+        ufds[0].events = POLLIN;
+        int pollVal = poll(ufds, 1, CONNECTION_TIMEOUT);
+
+        if (pollVal > 0) {
+            int buffLen = receive(client, recBuff);
+            if (buffLen != 0) {
+                printf("\nReceived\n%s\nparsing request... \n", recBuff);
+                struct HTTP_request *request = parse_request(client, recBuff, buffLen);
+                if (request != NULL) {
+                    printf("Parsed\n");
+
+                    if (request->keep_alive != 1)
+                        connectionAlive = 0;
+
+                    serve(client, request);
+
+                    free_request(request);
+                    connectionAlive--;
+                }
+            } else {
+                closeClient(client);
+                return error("An error occurred attempting to read from the socket");
+            }
+        } else if (pollVal == 0) {
+            connectionAlive = 0;
+        } else {
+            perror("Failed to poll socket");
+            connectionAlive = 0;
+        }
+        free(recBuff);
+    }
     closeClient(client);
-
+    return 0;
 }
 
-int recieve(struct Client *client, char *buff) {
-    int bufferSize = sizeof(char) * recvBuffSize;
-    recv(client->socket, buff, bufferSize, 0);
-    int CRLF_pos;
-    while ((CRLF_pos = strstr(buff, "\r\n")) == -1) {
-        bufferSize += sizeof(char) * recvBuffSize;
-        realloc(buff, bufferSize);
-    }
+/**
+ * Pull a single request off the socket
+ * @param client
+ * @param buff
+ * @return The length of the buffer
+ */
+int receive(struct Client *client, char *buff) {
 
-    return CRLF_pos;
+    struct pollfd ufds[1];
+    ufds[0].fd = client->socket;
+    ufds[0].events = POLLIN;
+
+    int bufferSize;
+    int buffLen = 0;
+    int numBytes = RECVBUFFSIZE;
+    int pollVal = poll(ufds, 1, -1);
+    while (numBytes == RECVBUFFSIZE) {
+        numBytes = recv(client->socket, buff + buffLen, RECVBUFFSIZE, 0);
+        printf("numBytes: %d\n", numBytes);
+        buffLen += numBytes;
+        bufferSize = buffLen + RECVBUFFSIZE;
+        if (realloc(buff, bufferSize) == NULL) {
+            perror("Failed to realloc for receiving request");
+            return 0;
+        }
+    }
+    if (pollVal == -1 || (pollVal == 0 && buffLen == 0))
+        return 0;
+
+    return buffLen;
+
 }
 
 int closeClient(struct Client *client) {
-    printf("Closing client %d... ");
+
+    if (client == NULL) return error("Failed to close uninitialised client");
+
+    printf("Closing client %d...\n", client->id);
     close(client->socket);
+    // TODO: EC
+
     free(client);
     printf("SUCCESS\n");
     return 0;
