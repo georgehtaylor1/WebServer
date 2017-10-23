@@ -64,5 +64,10 @@ Next task is to attempt some of the extensions and set the process up as a daemo
 ## 22/10/17
 
 With more time I'm glad to have the opportunity to make the solution far better!
-The server has been cleaned up hugely and a lot of additional error checking has been intriduced (although still not enough).
-The receipt of messages now works by bloking until a poll() indicates that there are bytes to be read from the socket. The server will then read from the socket until a 
+The server has been cleaned up hugely and a lot of additional error checking has been introduced (although still not enough).
+The receipt of messages now works by blocking until a poll() indicates that there are bytes to be read from the socket. The server will then read from the socket until a recv() request produces 0 bytes
+
+## 23/10/17
+
+A lot of cleaning up of the code has been done, and a lot of error checking has been added to server.c (needs repeating for the helpers)
+Hopefully I'll be able to implement some of the extensions over the coming days!

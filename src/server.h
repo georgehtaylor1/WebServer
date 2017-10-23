@@ -9,7 +9,7 @@ struct Client {
 };
 
 
-char * server_root_dir;
+char *server_root_dir;
 
 int receive(struct Client *client, char *buff);
 

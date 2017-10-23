@@ -9,12 +9,9 @@
 #include "helpers.h"
 #include "server.h"
 
-#define RECVBUFFSIZE 16
+#define RECVBUFFSIZE 1024
 #define CONNECTION_TIMEOUT 30000
 #define CONNECTION_REQUEST_LIMIT 10
-
-char excessBuffer[RECVBUFFSIZE];
-int excessLength = 0;
 
 struct Client *new_client = NULL;
 int sock_desc;
@@ -38,11 +35,14 @@ int error(char *msg) {
 int main(int argc, char **argv) {
 
     if (argc < 2) {
-        perror("Insufficient paramters supplied, usage: ./server <-d?> <port> <web directory>");
-        return 1;
+        error("Insufficient paramters supplied, usage: ./server <-d?> <port> <web directory>");
+        exit(EXIT_FAILURE);
     }
 
-    if (signal(SIGINT, sig_handler) == SIG_ERR) return error("Can't catch SIGINT");
+    if (signal(SIGINT, sig_handler) == SIG_ERR) {
+        error("Can't catch SIGINT");
+        exit(EXIT_FAILURE);
+    }
 
     if (strcmp(argv[1], "-d") == 0 && argc == 4) {
 
@@ -69,15 +69,20 @@ int main(int argc, char **argv) {
         close(STDOUT_FILENO);
         close(STDERR_FILENO);
 
-    } else if (argc != 3)
-        return error("Insufficient parameters supplied, usage: ./server <-d?> <port> <web directory>");
+    } else if (argc != 3) {
+        error("Insufficient parameters supplied, usage: ./server <-d?> <port> <web directory>");
+        exit(EXIT_FAILURE);
+    }
 
     int port = atoi(argv[1]);
     server_root_dir = argv[2];
 
     int counter = 0;
     sock_desc = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock_desc == -1) return error("Failed to creeate socket");
+    if (sock_desc == -1) {
+        error("Failed to create socket");
+        exit(EXIT_FAILURE);
+    }
 
     // Setup the host listener
     struct sockaddr_in server;
@@ -86,23 +91,32 @@ int main(int argc, char **argv) {
     server.sin_port = htons(port);
 
     if (bind(sock_desc, (struct sockaddr *) &server, sizeof(server)) == -1) {
-        printf("Failed to bind\n");
-        return 1;
+        error("Failed to bind");
+        exit(EXIT_FAILURE);
     }
 
-    printf("%d: Listening\n", getpid());
-    listen(sock_desc, 2);
+    if (listen(sock_desc, 2) == -1) {
+        error("Failed to listen on socket");
+        exit(EXIT_FAILURE);
+    }
+
 
     int server_alive = 1;
 
     while (server_alive == 1) {
         // Connect a new client
         new_client = malloc(sizeof(struct Client));
+        if (new_client == NULL) {
+            perror("Failed to allocate memory for new client");
+        }
         new_client->socket = accept(sock_desc, &new_client->sock_addr, &new_client->client_length);
         new_client->id = counter++;
         int pid = fork();
 
-        if (pid == 0) {
+        if (pid == -1) {
+            perror("Failed to fork new process");
+            closeClient(new_client);
+        } else if (pid == 0) {
             printf("Forked new client with id %d\n", new_client->id);
             return serveClient(new_client);
         } else {
@@ -110,6 +124,7 @@ int main(int argc, char **argv) {
         }
     }
 }
+
 
 /**
  *
@@ -129,6 +144,9 @@ int serveClient(struct Client *client) {
     while (connectionAlive > 0) {
 
         char *recBuff = malloc(sizeof(char) * RECVBUFFSIZE);
+        if (recBuff == NULL) {
+            return error("Failed to allocate memory for buffer");
+        }
 
         printf("Waiting to receive\n");
 
@@ -187,6 +205,10 @@ int receive(struct Client *client, char *buff) {
     int pollVal = poll(ufds, 1, -1);
     while (numBytes == RECVBUFFSIZE) {
         numBytes = recv(client->socket, buff + buffLen, RECVBUFFSIZE, 0);
+        if (numBytes == -1) {
+            perror("Error recv()ing bytes");
+            return 0;
+        }
         printf("numBytes: %d\n", numBytes);
         buffLen += numBytes;
         bufferSize = buffLen + RECVBUFFSIZE;
@@ -208,8 +230,6 @@ int closeClient(struct Client *client) {
 
     printf("Closing client %d...\n", client->id);
     close(client->socket);
-    // TODO: EC
-
     free(client);
     printf("SUCCESS\n");
     return 0;
