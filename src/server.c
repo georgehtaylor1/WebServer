@@ -16,15 +16,20 @@
 struct Client *new_client = NULL;
 int sock_desc;
 
+int connectionAlive, serverAlive;
+
 void sig_handler(int signo) {
     if (signo == SIGINT)
         printf("Killing server\n");
 
-    closeClient(new_client);
-    close(sock_desc);
+    //closeClient(new_client);
+    //close(sock_desc);
+
+    connectionAlive = 0;
+    serverAlive = 0;
 
     printf("Process terminated\n");
-    exit(0);
+
 }
 
 int error(char *msg) {
@@ -100,29 +105,46 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
+    serverAlive = 1;
 
-    int server_alive = 1;
+    struct pollfd ufds[1];
+    ufds[0].fd = sock_desc;
+    ufds[0].events = POLLIN;
 
-    while (server_alive == 1) {
+    while (serverAlive == 1) {
         // Connect a new client
         new_client = malloc(sizeof(struct Client));
         if (new_client == NULL) {
             perror("Failed to allocate memory for new client");
         }
-        new_client->socket = accept(sock_desc, &new_client->sock_addr, &new_client->client_length);
-        new_client->id = counter++;
-        int pid = fork();
 
-        if (pid == -1) {
-            perror("Failed to fork new process");
-            closeClient(new_client);
-        } else if (pid == 0) {
-            printf("Forked new client with id %d\n", new_client->id);
-            return serveClient(new_client);
-        } else {
-            closeClient(new_client);
+        printf("%d - server polling\n", getpid());
+        int pollVal = poll(ufds, 1, -1);
+        printf("%d - server done\n", getpid());
+        if (pollVal > 0) {
+            printf("%d - Waiting to accept\n", getpid());
+            new_client->socket = accept(sock_desc, &new_client->sock_addr, &new_client->client_length);
+            printf("%d - accepted\n", getpid());
+            if (new_client->socket != -1) {
+                new_client->id = counter++;
+                int pid = fork();
+
+                if (pid == -1) {
+                    perror("Failed to fork new process");
+                    closeClient(new_client);
+                } else if (pid == 0) {
+                    printf("Forked new client with id %d\n", new_client->id);
+                    return serveClient(new_client);
+                } else {
+                    closeClient(new_client);
+                }
+            }
         }
     }
+    printf("%d - Escaped!\n", getpid());
+    close(sock_desc);
+    if (new_client != NULL) free(new_client);
+    return 0;
 }
 
 
@@ -139,7 +161,7 @@ int serveClient(struct Client *client) {
 
     printf("Connection success\n");
 
-    int connectionAlive = CONNECTION_REQUEST_LIMIT;
+    connectionAlive = CONNECTION_REQUEST_LIMIT;
 
     while (connectionAlive > 0) {
 
@@ -153,7 +175,9 @@ int serveClient(struct Client *client) {
         struct pollfd ufds[1];
         ufds[0].fd = client->socket;
         ufds[0].events = POLLIN;
+        printf("%d - serveClient() polling\n", getpid());
         int pollVal = poll(ufds, 1, CONNECTION_TIMEOUT);
+        printf("%d - serveClient() done\n", getpid());
 
         if (pollVal > 0) {
             int buffLen = receive(client, recBuff);
@@ -173,6 +197,7 @@ int serveClient(struct Client *client) {
                 }
             } else {
                 closeClient(client);
+                free(recBuff);
                 return error("An error occurred attempting to read from the socket");
             }
         } else if (pollVal == 0) {
@@ -202,7 +227,9 @@ int receive(struct Client *client, char *buff) {
     int bufferSize;
     int buffLen = 0;
     int numBytes = RECVBUFFSIZE;
+    printf("%d - polling\n", getpid());
     int pollVal = poll(ufds, 1, -1);
+    printf("%d - done\n", getpid());
     while (numBytes == RECVBUFFSIZE) {
         numBytes = recv(client->socket, buff + buffLen, RECVBUFFSIZE, 0);
         if (numBytes == -1) {
