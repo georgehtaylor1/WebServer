@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <poll.h>
 #include <signal.h>
+#include <string.h>
 #include "helpers.h"
 #include "server.h"
 

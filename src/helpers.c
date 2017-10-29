@@ -48,8 +48,8 @@ struct HTTP_request *parse_request(struct Client *client, char *request, int buf
     if (keep_alive != NULL) {
         result->keep_alive = (strncmp(keep_alive, "keep-alive", 10) == 0) ? 1 : 0;
         printf("strncmp = %d\n", strncmp(keep_alive, "keep-alive", 10));
+        free(keep_alive);
     }
-    free(keep_alive);
 
     return result;
 }
@@ -73,10 +73,8 @@ char *extract_header_item(char *request, char *identifier) {
 int free_request(struct HTTP_request *request) {
     // TODO: Needs checks for invalid free
     free(request->host);
-    free(request->content);
     free(request->referer);
     free(request->requestURI);
-    free(request->FQrequestURI);
     free(request);
     return 0;
 }
@@ -148,13 +146,16 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request,
     } else {
         if (errno == ENOENT) {
             perror("Not a valid directory");
+            if(responseHTML != NULL) free(responseHTML);
             return response_404(client, headers);
         }
         if (errno == EACCES) {
             perror("Illegal file access");
+            if(responseHTML != NULL) free(responseHTML);
             return response_403(client, headers);
         }
         perror("Couldn't open directory");
+        if(responseHTML != NULL) free(responseHTML);
         return response_500(client, headers);
     }
 
@@ -174,15 +175,24 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request,
 }
 
 int serve_file(struct Client *client, char file[1024], char *headers) {
-    write(client->socket, "HTTP/1.1 200 OK\n", 17);
-    write(client->socket, headers, strlen(headers));
-    write(client->socket, "\n\n", 2);
 
     FILE *f = fopen(file, "r");
     if (f == NULL) {
         perror("Failed to open file");
         return response_500(client, NULL);
     }
+
+    fseek(f, 0, SEEK_END);
+    int length = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    char contentLength[1024];
+    sprintf(contentLength, "Content-length: %d", length);
+
+    write(client->socket, "HTTP/1.1 200 OK\n", 17);
+    write(client->socket, headers, strlen(headers));
+    write(client->socket, contentLength, strlen(contentLength));
+    write(client->socket, "\n\n", 2);
 
     char buffer[MAX_READ_BUFFER];
     int bytes_read = 0;
@@ -229,7 +239,7 @@ int file_exists(char *path) {
 
 int response_404(struct Client *client, char *headers) {
     write(client->socket, "HTTP/1.1 404 Not Found\n", 23);
-    write(client->socket, headers, strlen(headers));
+    if (headers != NULL) write(client->socket, headers, strlen(headers));
     write(client->socket, "\n\n", 2);
     write(client->socket, "The requested resource could not be located", 43);
     return 0;
@@ -237,7 +247,7 @@ int response_404(struct Client *client, char *headers) {
 
 int response_403(struct Client *client, char *headers) {
     write(client->socket, "HTTP/1.1 403 Forbidden\n", 23);
-    write(client->socket, headers, strlen(headers));
+    if (headers != NULL) write(client->socket, headers, strlen(headers));
     write(client->socket, "\n\n", 2);
     write(client->socket, "The user is not authorized to access this service", 50);
     return 0;
@@ -245,14 +255,14 @@ int response_403(struct Client *client, char *headers) {
 
 int response_500(struct Client *client, char *headers) {
     write(client->socket, "HTTP/1.1 500 Internal Server Error\n", 37);
-    write(client->socket, headers, strlen(headers));
+    if (headers != NULL) write(client->socket, headers, strlen(headers));
     write(client->socket, "\n\n", 2);
     return 1;
 }
 
 int response_501(struct Client *client, char *headers) {
     write(client->socket, "HTTP/1.1 501 Not Implemented\n", 29);
-    write(client->socket, headers, strlen(headers));
+    if (headers != NULL) write(client->socket, headers, strlen(headers));
     write(client->socket, "\n\n", 2);
     return 1;
 }
