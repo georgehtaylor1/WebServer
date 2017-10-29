@@ -11,7 +11,7 @@ struct Client {
 
 char *server_root_dir;
 
-int receive(struct Client *client, char *buff);
+int receive(struct Client *client, char **buff);
 
 int serveClient(struct Client *client);
 

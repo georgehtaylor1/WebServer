@@ -71,3 +71,13 @@ The receipt of messages now works by blocking until a poll() indicates that ther
 
 A lot of cleaning up of the code has been done, and a lot of error checking has been added to server.c (needs repeating for the helpers)
 Hopefully I'll be able to implement some of the extensions over the coming days!
+
+## 28/10/17
+
+Changed the architecture so that directory listings can be served without the need to redirect to an `index.html`
+Fixed a pretty colossal memory leak. THe receiving buffer was being realloced but the pointer to the start was not being updated. This made the error appear non-deterministic as it would only occur if there was insufficient memory for an in-place realloc().
+THe termination of the program has been tidied up and polling has been introduced to ensure the program can terminate immediately.
+
+[19:53]
+
+Added the ability to provide response headers and added keep-alive to the relevent responses. 

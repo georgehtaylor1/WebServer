@@ -11,14 +11,14 @@
 
 #define MAX_READ_BUFFER 2048
 
-struct HTTP_request *parse_request(struct Client *client, char *request, int buffLen) {
+struct HTTP_request *parse_request(struct Client *client, char *request, int buffLen, char *headers) {
     struct HTTP_request *result = malloc(sizeof(struct HTTP_request));
 
     // What type of request is it?
     if (strncmp(request, "GET", 3) == 0) {
         result->requestMethod = GET;
     } else {
-        response_501(client);
+        response_501(client, headers);
         return NULL;
     }
 
@@ -44,8 +44,12 @@ struct HTTP_request *parse_request(struct Client *client, char *request, int buf
 
     // Extract keep-alive
     char *keep_alive = extract_header_item(request, "Connection");
-    if (keep_alive != NULL)
-        result->keep_alive = strcmp(keep_alive, "keep-alive");
+    printf("%s\n", keep_alive);
+    if (keep_alive != NULL) {
+        result->keep_alive = (strncmp(keep_alive, "keep-alive", 10) == 0) ? 1 : 0;
+        printf("strncmp = %d\n", strncmp(keep_alive, "keep-alive", 10));
+    }
+    free(keep_alive);
 
     return result;
 }
@@ -77,46 +81,33 @@ int free_request(struct HTTP_request *request) {
     return 0;
 }
 
-int serve(struct Client *client, struct HTTP_request *request) {
+int serve(struct Client *client, struct HTTP_request *request, char *headers) {
 
     char dir[1024];
     strcpy(dir, server_root_dir);
     strcat(dir, request->requestURI);
     printf("Dir: %s\n", dir);
-    if (is_file(dir) == 0) {
-        return temp_redirect(client, "index.html");
-    }
 
-    if (file_exists(dir)) {
-        serve_file(client, dir);
-    } else {
-        int dirLen = strlen(dir);
-        if (strcmp("index.html", dir + dirLen - 10) == 0)
-            serve_directory_listing(client, request);
-        else
-            return error_404(client);
-    }
-    return 0;
+    if (is_file(dir) == 0)
+        return serve_directory_listing(client, request, headers);
+
+    if (file_exists(dir))
+        return serve_file(client, dir, headers);
+    else
+        return response_404(client, headers);
 }
 
-int serve_directory_listing(struct Client *client, struct HTTP_request *request) {
+int serve_directory_listing(struct Client *client, struct HTTP_request *request, char *headers) {
 
     int length = 100;
     char *responseHTML = malloc(sizeof(char) * length);
     strcpy(responseHTML, "<html><body>");
 
-    char dir[1024];
+    char dir[PATH_MAX];
 
     strcpy(dir, server_root_dir);
 
     strcat(dir, request->requestURI);
-    int dirLen = strlen(dir);
-
-    printf("dir: %s\n", dir);
-
-    if (strcmp("index.html", dir + dirLen - 10) == 0) {
-        dir[dirLen - 10] = '\0';
-    }
 
     printf("dir: %s\n", dir);
 
@@ -128,22 +119,23 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request)
     if (dp != NULL) {
         while ((ep = readdir(dp)) != NULL) {
             // TODO: Fix this to use sprintf
-            char line[2048] = "";
-
-            char path[1024];
+            char line[PATH_MAX + 24] = "";
+            char path[PATH_MAX];
 
             sprintf(path, "%s%s", dir, ep->d_name);
 
             strcat(line, "<a href='");
             strcat(line, ep->d_name);
-            if (is_file(path) == 0) {
-                strcat(line, "/index.html");
-            }
+
+            if (is_file(path) == 0)
+                strcat(line, "/");
+
             strcat(line, "'>");
             strcat(line, ep->d_name);
-            if (is_file(path) == 0) {
+
+            if (is_file(path) == 0)
                 strcat(line, "/");
-            }
+
             strcat(line, "</a><br />");
             int newLen = strlen(responseHTML) + strlen(line) + 1;
             if (newLen > length) {
@@ -154,40 +146,42 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request)
         }
         closedir(dp);
     } else {
-        if(errno == ENOENT){
+        if (errno == ENOENT) {
             perror("Not a valid directory");
-            return error_404(client);
+            return response_404(client, headers);
         }
-        if (errno == EACCES){
+        if (errno == EACCES) {
             perror("Illegal file access");
-            return response_500(client);
-            // TODO: Return correct response
+            return response_403(client, headers);
         }
         perror("Couldn't open directory");
-        return response_500(client);
+        return response_500(client, headers);
     }
 
+    responseHTML = realloc(responseHTML, sizeof(char) * (strlen(responseHTML) + 16));
     strcat(responseHTML, "</body></html>");
 
     write(client->socket, "HTTP/1.1 200 OK\n", 16);
+    write(client->socket, headers, strlen(headers));
 
     char contentLength[128];
     sprintf(contentLength, "Content-length: %zu\n\n", strlen(responseHTML));
 
     write(client->socket, contentLength, strlen(contentLength));
     write(client->socket, responseHTML, strlen(responseHTML) + 1);
-
+    free(responseHTML);
     return 0;
 }
 
-int serve_file(struct Client *client, char *file) {
+int serve_file(struct Client *client, char file[1024], char *headers) {
     write(client->socket, "HTTP/1.1 200 OK\n", 17);
+    write(client->socket, headers, strlen(headers));
     write(client->socket, "\n\n", 2);
 
     FILE *f = fopen(file, "r");
     if (f == NULL) {
         perror("Failed to open file");
-        return response_500(client);
+        return response_500(client, NULL);
     }
 
     char buffer[MAX_READ_BUFFER];
@@ -209,6 +203,11 @@ int serve_file(struct Client *client, char *file) {
     return 0;
 }
 
+/**
+ * Check if a path specifies a file, directory or other
+ * @param name The path to be checked
+ * @return 0 if <name> is a directory, 1 if it is a file, -1 in any other case
+ */
 int is_file(const char *name) {
     DIR *directory = opendir(name);
 
@@ -228,30 +227,42 @@ int file_exists(char *path) {
     return stat(path, &pathStat) == 0;
 }
 
-int error_404(struct Client *client) {
+int response_404(struct Client *client, char *headers) {
     write(client->socket, "HTTP/1.1 404 Not Found\n", 23);
+    write(client->socket, headers, strlen(headers));
     write(client->socket, "\n\n", 2);
     write(client->socket, "The requested resource could not be located", 43);
-    return 1;
-}
-
-int response_500(struct Client *client) {
-    write(client->socket, "HTTP/1.1 500 Internal Server Error\n", 37);
-    write(client->socket, "\n\n", 2);
-    return 1;
-}
-
-int response_501(struct Client *client) {
-    write(client->socket, "HTTP/1.1 501 Not Implemented\n", 29);
-    write(client->socket, "\n\n", 2);
-    return 1;
-}
-
-int temp_redirect(struct Client *client, char *red) {
-    printf("Redirected\n");
-    write(client->socket, "HTTP/1.1 302 Found\n", 19);
-    write(client->socket, "Location: ", 10);
-    write(client->socket, red, strlen(red) + 1);
-    write(client->socket, "\n\n", 2);
     return 0;
 }
+
+int response_403(struct Client *client, char *headers) {
+    write(client->socket, "HTTP/1.1 403 Forbidden\n", 23);
+    write(client->socket, headers, strlen(headers));
+    write(client->socket, "\n\n", 2);
+    write(client->socket, "The user is not authorized to access this service", 50);
+    return 0;
+}
+
+int response_500(struct Client *client, char *headers) {
+    write(client->socket, "HTTP/1.1 500 Internal Server Error\n", 37);
+    write(client->socket, headers, strlen(headers));
+    write(client->socket, "\n\n", 2);
+    return 1;
+}
+
+int response_501(struct Client *client, char *headers) {
+    write(client->socket, "HTTP/1.1 501 Not Implemented\n", 29);
+    write(client->socket, headers, strlen(headers));
+    write(client->socket, "\n\n", 2);
+    return 1;
+}
+//
+//int temp_redirect(struct Client *client, char *red) {
+//    printf("Redirected\n");
+//    write(client->socket, "HTTP/1.1 302 Found\n", 19);
+//    write(client->socket, headers, strlen(headers));
+//    write(client->socket, "Location: ", 10);
+//    write(client->socket, red, strlen(red) + 1);
+//    write(client->socket, "\n\n", 2);
+//    return 0;
+//}
