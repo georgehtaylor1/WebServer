@@ -82,6 +82,9 @@ int main(int argc, char **argv) {
     int port = atoi(argv[1]);
     server_root_dir = argv[2];
 
+    if(server_root_dir[strlen(server_root_dir) - 1] == '/')
+        server_root_dir[strlen(server_root_dir) - 1] = '\0';
+
     int counter = 0;
     sock_desc = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_desc == -1) {
@@ -178,7 +181,7 @@ int serveClient(struct Client *client) {
             int buffLen = receive(client, &recBuff);
             if (buffLen != 0) {
                 printf("\nReceived\n%s\nparsing request... \n", recBuff);
-                struct HTTP_request *request = parse_request(client, recBuff, buffLen, headers);
+                struct HTTP_request *request = parse_request(client, recBuff, headers);
                 if (request != NULL) {
 
                     if (request->keep_alive != 1) {
