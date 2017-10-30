@@ -210,28 +210,35 @@ int serveClient(struct Client *client) {
 
         printf("Waiting to receive\n");
 
+        // Setup and poll the socket for a new request, timing out if no request arrives
         struct pollfd ufds[1];
         ufds[0].fd = client->socket;
         ufds[0].events = POLLIN;
         int pollVal = poll(ufds, 1, CONNECTION_TIMEOUT);
 
+        // If the poll indicates a message was received
         if (pollVal > 0) {
+
+            // Pull the request off the socket
             int buffLen = receive(client, &recBuff);
             if (buffLen != 0) {
+
+                // Create the request object
                 printf("\nReceived\n%s\nparsing request... \n", recBuff);
                 struct HTTP_request *request = parse_request(client, recBuff, headers);
                 if (request != NULL) {
 
-                    if (request->keep_alive != 1) {
+                    if (request->keep_alive != 1)
                         connectionAlive = 0;
-                    }
 
+                    // Server the response to this particular request to the client
                     serve(client, request, headers);
 
                     free_request(request);
                     connectionAlive--;
                 }
             } else {
+                // No data was received for the client so close it and free the request buffer
                 closeClient(client);
                 free(recBuff);
                 return error("An error occurred attempting to read from the socket");
@@ -250,13 +257,14 @@ int serveClient(struct Client *client) {
 }
 
 /**
- * Pull a single request off the socket
- * @param client
- * @param buff
- * @return The length of the buffer
+ * Pull a single request off the socket.
+ * @param client THe client to receive the request from.
+ * @param buff The buffer to read the request into.
+ * @return The length of the buffer.
  */
 int receive(struct Client *client, char **buff) {
 
+    // Setup the poll
     struct pollfd ufds[1];
     ufds[0].fd = client->socket;
     ufds[0].events = POLLIN;
@@ -264,13 +272,19 @@ int receive(struct Client *client, char **buff) {
     int bufferSize;
     int buffLen = 0;
     int numBytes = RECVBUFFSIZE;
+
+    // Poll until a request is received by the socket
     int pollVal = poll(ufds, 1, -1);
+
+    // Repeatedly pull RECVBUFFSIZE chunks off the socket
     while (numBytes == RECVBUFFSIZE) {
         numBytes = recv(client->socket, *buff + buffLen, RECVBUFFSIZE, 0);
         if (numBytes == -1) {
             perror("Error recv()ing bytes");
             return 0;
         }
+
+        // Put the bytes received onto the request buffer and expand the buffer to fit more bytes
         buffLen += numBytes;
         bufferSize = buffLen + RECVBUFFSIZE;
         if ((*buff = realloc(*buff, bufferSize)) == NULL) {
@@ -281,6 +295,7 @@ int receive(struct Client *client, char **buff) {
     if (pollVal == -1 || (pollVal == 0 && buffLen == 0))
         return 0;
 
+    // Terminate the buffer correctly
     *(*buff + buffLen) = '\0';
 
     return buffLen;
@@ -331,10 +346,16 @@ void create_date(char *date) {
             tm.tm_sec);
 }
 
+/**
+ * Close a connection to a client
+ * @param client The client to close the connection to
+ * @return 0 on success, -1 on error
+ */
 int closeClient(struct Client *client) {
 
     if (client == NULL) return error("Failed to close uninitialised client");
 
+    // Close the client and free any space it was consuming
     printf("%d - Closing client %d...\n", getpid(), client->id);
     close(client->socket);
     free(client);

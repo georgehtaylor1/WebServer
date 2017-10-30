@@ -25,11 +25,13 @@ int serve_file(struct Client *client, struct HTTP_request *request, char file[10
 
 char *get_content_type(char *extension);
 
-int is_file(const char *name);
+int is_directory(const char *name);
 
 int file_exists(char *path);
 
 void free_request(struct HTTP_request *request);
+
+char *sanitize_spaces(char *orig);
 
 // Error functions
 int response_404(struct Client *client, struct HTTP_request *request, char *string);

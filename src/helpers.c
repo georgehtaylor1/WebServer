@@ -38,7 +38,9 @@ struct HTTP_request *parse_request(struct Client *client, char *request, char *h
     char *URI = malloc(sizeof(char) * (URILength + 1));
     strncpy(URI, requestURIStartPtr, URILength);
     URI[URILength] = '\0';
-    result->requestURI = URI;
+    char *newURI = sanitize_spaces(URI);
+    result->requestURI = newURI;
+    free(URI);
 
     // Extract the host
     result->host = extract_header_item(request, "Host");
@@ -110,9 +112,8 @@ int serve(struct Client *client, struct HTTP_request *request, char *headers) {
     printf("Dir: %s\n", dir);
 
     // If the requested resource is a directory then return a directory listing
-    if (is_file(dir) == 0)
+    if (is_directory(dir) == 1)
         return serve_directory_listing(client, request, headers);
-
     // If the file exists then serve the file, otherwise return a 404
     if (file_exists(dir))
         return serve_file(client, request, dir, headers);
@@ -165,13 +166,13 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request,
                 strcat(line, "<a href='");
                 strcat(line, ep->d_name);
 
-                if (is_file(path) == 0)
+                if (is_directory(path) == 1)
                     strcat(line, "/");
 
                 strcat(line, "'>");
                 strcat(line, ep->d_name);
 
-                if (is_file(path) == 0)
+                if (is_directory(path) == 1)
                     strcat(line, "/");
 
                 strcat(line, "</a><br />");
@@ -226,7 +227,7 @@ int serve_directory_listing(struct Client *client, struct HTTP_request *request,
  * @return -1 on failure, 0 on success. If an error occurs but it is handled suitably by the server then this is considered a success.
  */
 int serve_file(struct Client *client, struct HTTP_request *request, char file[1024], char *headers) {
-
+    printf("Attempting to server\n");
     // Open the requested file
     FILE *f = fopen(file, "r");
     if (f == NULL) {
@@ -241,9 +242,9 @@ int serve_file(struct Client *client, struct HTTP_request *request, char file[10
 
     char contentLength[1024];
     sprintf(contentLength, "Content-length: %d\n", length);
-
+    printf("%s", contentLength);
     // Send the response header to the client
-    write(client->socket, "HTTP/1.1 200 OK\n", 17);
+    write(client->socket, "HTTP/1.1 200 OK\n", 16);
     write(client->socket, headers, strlen(headers));
     write(client->socket, contentLength, strlen(contentLength));
 
@@ -258,13 +259,13 @@ int serve_file(struct Client *client, struct HTTP_request *request, char file[10
         }
     }
 
-    write(client->socket, "\n\n", 2);
+    write(client->socket, "\n", 1);
 
     if (request->requestMethod == GET) {
         char buffer[MAX_READ_BUFFER];
         int bytes_read = 0;
         char *bufferPtr;
-
+        int totalWritten = 0;
         // While there are still bytes being read from the file send them to the client across the socket.
         // This will occur in chunks of MAX_READ_BUFFER size
         while ((bytes_read = fread(buffer, sizeof(char), MAX_READ_BUFFER, f)) > 0) {
@@ -275,11 +276,12 @@ int serve_file(struct Client *client, struct HTTP_request *request, char file[10
                 bytes_read -= bytes_written;
                 bufferPtr += bytes_written;
                 bytes_written = write(client->socket, bufferPtr, bytes_read);
+                totalWritten += bytes_written;
             }
         }
         fclose(f);
 
-        printf("Successfully sent %s\n", file);
+        printf("Successfully sent %d, %s\n", totalWritten, file);
     }
     return 0;
 }
@@ -307,18 +309,18 @@ char *get_content_type(char *extension) {
 /**
  * Check if a path specifies a file, directory or other.
  * @param name The path to be checked.
- * @return 0 if <name> is a directory, 1 if it is a file, -1 in any other case.
+ * @return 1 if <name> is a directory, 0 if it isn't a directory, -1 in any other case.
  */
-int is_file(const char *name) {
+int is_directory(const char *name) {
     DIR *directory = opendir(name);
 
     if (directory != NULL) {
         closedir(directory);
-        return 0;
+        return 1;
     }
 
     if (errno == ENOTDIR)
-        return 1;
+        return 0;
 
     return -1;
 }
@@ -329,8 +331,46 @@ int is_file(const char *name) {
  * @return 1 if the file exists, 0 otherwise
  */
 int file_exists(char *path) {
+    printf("Checking file\n");
     struct stat pathStat;
     return stat(path, &pathStat) == 0;
+}
+
+/**
+ * String replace function borrowed from https://stackoverflow.com/questions/779875/what-is-the-function-to-replace-string-in-c
+ * No point reinventing the wheel after all!
+ * @param dir
+ * @return
+ */
+char *sanitize_spaces(char *dir) {
+
+    // count the number of replacements needed
+    char *ins = dir;
+    char *tmp;
+    int count;
+    for (count = 0; (tmp = strstr(ins, "%20")); ++count) {
+        ins = tmp + 3;
+    }
+
+    // Create the return string
+    char *result;
+    result = malloc(strlen(dir) - 2 * count + 1);
+    if (!result)
+        return NULL;
+
+    tmp = result;
+
+    // Pass through the dir string copying chunks between %20 into the return string
+    int len_front;
+    while (count--) {
+        ins = strstr(dir, "%20");
+        len_front = ins - dir;
+        tmp = strncpy(tmp, dir, len_front) + len_front;
+        tmp = strcpy(tmp, " ") + 1;
+        dir += len_front + 3; // move to next "end of rep"
+    }
+    strcpy(tmp, dir);
+    return result;
 }
 
 /**
@@ -341,7 +381,9 @@ int file_exists(char *path) {
  * @return 0 on success.
  */
 int response_404(struct Client *client, struct HTTP_request *request, char *headers) {
+    printf("404\n");
     write(client->socket, "HTTP/1.1 404 Not Found\n", 23);
+    write(client->socket, "Content-length: 43\n", 19);
     if (headers != NULL) write(client->socket, headers, strlen(headers));
     write(client->socket, "\n\n", 2);
     if (request->requestMethod == GET) write(client->socket, "The requested resource could not be located", 43);
@@ -357,6 +399,7 @@ int response_404(struct Client *client, struct HTTP_request *request, char *head
  */
 int response_403(struct Client *client, struct HTTP_request *request, char *headers) {
     write(client->socket, "HTTP/1.1 403 Forbidden\n", 23);
+    write(client->socket, "Content-length: 50\n", 19);
     if (headers != NULL) write(client->socket, headers, strlen(headers));
     write(client->socket, "\n\n", 2);
     if (request->requestMethod == GET) write(client->socket, "The user is not authorized to access this service", 50);
