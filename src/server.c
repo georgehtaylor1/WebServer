@@ -6,6 +6,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <string.h>
+#include <time.h>
 #include "helpers.h"
 #include "server.h"
 
@@ -18,12 +19,13 @@ int sock_desc;
 
 int connectionAlive, serverAlive;
 
+/**
+ * Handle a SIGINT interrupt.
+ * @param signo The signal sent to the program.
+ */
 void sig_handler(int signo) {
     if (signo == SIGINT)
         printf("Killing server\n");
-
-    //closeClient(new_client);
-    //close(sock_desc);
 
     connectionAlive = 0;
     serverAlive = 0;
@@ -32,23 +34,37 @@ void sig_handler(int signo) {
 
 }
 
+/**
+ * Produce an error.
+ * @param msg THe message for the error.
+ * @return return -1 as a standard.
+ */
 int error(char *msg) {
     perror(msg);
-    return 1;
+    return -1;
 }
 
+/**
+ * Start the server.
+ * @param argc How many arguments have been passed to the process.
+ * @param argv THe arguments for the process.
+ * @return 0 on success, -1 on failure.
+ */
 int main(int argc, char **argv) {
 
+    // Check if sufficient parameters have been supplied to the program.
     if (argc < 2) {
         error("Insufficient paramters supplied, usage: ./server <-d?> <port> <web directory>");
         exit(EXIT_FAILURE);
     }
 
+    // Set up the program to catch SIGINT
     if (signal(SIGINT, sig_handler) == SIG_ERR) {
         error("Can't catch SIGINT");
         exit(EXIT_FAILURE);
     }
 
+    // Should the program be run as a daemon?
     if (strcmp(argv[1], "-d") == 0 && argc == 4) {
 
         // Set the process up to run as a daemon
@@ -79,13 +95,15 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
+    // Get the port number from the parameters and parse the root directory
     int port = atoi(argv[1]);
     server_root_dir = argv[2];
 
-    if(server_root_dir[strlen(server_root_dir) - 1] == '/')
+    // Remove the trailing '/' from the root directory if there is one
+    if (server_root_dir[strlen(server_root_dir) - 1] == '/')
         server_root_dir[strlen(server_root_dir) - 1] = '\0';
 
-    int counter = 0;
+    // Create the socket
     sock_desc = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_desc == -1) {
         error("Failed to create socket");
@@ -98,18 +116,22 @@ int main(int argc, char **argv) {
     server.sin_addr.s_addr = INADDR_ANY;
     server.sin_port = htons(port);
 
+    // Bind the socket to the port
     if (bind(sock_desc, (struct sockaddr *) &server, sizeof(server)) == -1) {
         error("Failed to bind");
         exit(EXIT_FAILURE);
     }
 
+    // Start listening on the socket
     if (listen(sock_desc, 2) == -1) {
         error("Failed to listen on socket");
         exit(EXIT_FAILURE);
     }
 
     serverAlive = 1;
+    int clientCounter = 0;
 
+    // Set up the poller
     struct pollfd ufds[1];
     ufds[0].fd = sock_desc;
     ufds[0].events = POLLIN;
@@ -121,13 +143,17 @@ int main(int argc, char **argv) {
             perror("Failed to allocate memory for new client");
         }
 
+        // Poll for a waiting client
         int pollVal = poll(ufds, 1, -1);
         if (pollVal > 0) {
+
+            //Accept a new client
             new_client->socket = accept(sock_desc, &new_client->sock_addr, &new_client->client_length);
             if (new_client->socket != -1) {
-                new_client->id = counter++;
-                int pid = fork();
+                new_client->id = clientCounter++;
 
+                // Fork a new process to handle the client
+                int pid = fork();
                 if (pid == -1) {
                     perror("Failed to fork new process");
                     closeClient(new_client);
@@ -148,10 +174,9 @@ int main(int argc, char **argv) {
 
 
 /**
- *
- * Serve a particular client while ever it's connection is alive
- * @param client The client to be served
- * @return Did the client serving complete correctly
+ * Serve a particular client while ever it's connection is alive.
+ * @param client The client to be served.
+ * @return Did the client serving complete correctly.
  */
 int serveClient(struct Client *client) {
     printf("%d: Serving client %d\n", getpid(), client->id);
@@ -162,20 +187,33 @@ int serveClient(struct Client *client) {
 
     connectionAlive = CONNECTION_REQUEST_LIMIT;
 
+    // While the connection hasn't expired
     while (connectionAlive > 0) {
-        char *recBuff = malloc(sizeof(char) * RECVBUFFSIZE);
-        if (recBuff == NULL) {
-            return error("Failed to allocate memory for buffer");
-        }
 
-        char *headers = (connectionAlive > 1) ? "Connection: keep-alive\n" : "";
+        // Create the buffer to receive a request
+        char *recBuff = malloc(sizeof(char) * RECVBUFFSIZE);
+        if (recBuff == NULL)
+            return error("Failed to allocate memory for buffer");
+
+        // Create any additional headers to be sent to this client
+        char headers[2048];
+        strcpy(headers, "");
+        strcat(headers, (connectionAlive > 1) ? "Connection: keep-alive\n" : "Connection: close\n");
+        strcat(headers, "Allowed: GET, HEAD\n");
+        strcat(headers, "Content-Language: en\n");
+        strcat(headers, "Server: Ju5t a humbl3 s3rv3r\n");
+        strcat(headers, "Date: ");
+        char date[29];
+        create_date(date);
+        strcat(headers, date);
+        strcat(headers, "\n");
 
         printf("Waiting to receive\n");
 
         struct pollfd ufds[1];
         ufds[0].fd = client->socket;
         ufds[0].events = POLLIN;
-            int pollVal = poll(ufds, 1, CONNECTION_TIMEOUT);
+        int pollVal = poll(ufds, 1, CONNECTION_TIMEOUT);
 
         if (pollVal > 0) {
             int buffLen = receive(client, &recBuff);
@@ -243,8 +281,54 @@ int receive(struct Client *client, char **buff) {
     if (pollVal == -1 || (pollVal == 0 && buffLen == 0))
         return 0;
 
+    *(*buff + buffLen) = '\0';
+
     return buffLen;
 
+}
+
+/**
+ * Create a string representation of the date
+ * @param date The date buffer to be filled, must be 29 characters
+ */
+void create_date(char *date) {
+
+    // Get the current time
+    time_t t = time(NULL);
+    struct tm tm = *localtime(&t);
+
+    //@formatter:off
+    // Create the three character day
+    char *day;
+    switch(tm.tm_wday){
+        case 0: day = "Sun"; break;
+        case 1: day = "Mon"; break;
+        case 2: day = "Tue"; break;
+        case 3: day = "Wed"; break;
+        case 4: day = "Thu"; break;
+        case 5: day = "Fri"; break;
+        case 6: day = "Sat"; break;
+    }
+
+    // Create the three character month
+    char *mon;
+    switch(tm.tm_mon){
+        case 0: mon = "Jan"; break;
+        case 1: mon = "Feb"; break;
+        case 2: mon = "Mar"; break;
+        case 3: mon = "Apr"; break;
+        case 4: mon = "May"; break;
+        case 5: mon = "Jun"; break;
+        case 6: mon = "Jul"; break;
+        case 7: mon = "Aug"; break;
+        case 8: mon = "Sep"; break;
+        case 9: mon = "Oct"; break;
+        case 10: mon = "Nov"; break;
+        case 11: mon = "Dec"; break;
+    }
+    //@formatter:on
+    sprintf(date, "%s, %02d %s %04d %02d:%02d:%02d GMT", day, tm.tm_mday, mon, tm.tm_year + 1900, tm.tm_hour, tm.tm_min,
+            tm.tm_sec);
 }
 
 int closeClient(struct Client *client) {

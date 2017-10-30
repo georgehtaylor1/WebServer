@@ -39,17 +39,12 @@ struct HTTP_request *parse_request(struct Client *client, char *request, char *h
     strncpy(URI, requestURIStartPtr, URILength);
     URI[URILength] = '\0';
     result->requestURI = URI;
-    printf("result->requestURI: %s\n", result->requestURI);
 
     // Extract the host
-    char *host = extract_header_item(request, "Host");
-    if (host != NULL)
-        result->host = host;
+    result->host = extract_header_item(request, "Host");
 
     // Extract Referer
-    char *referer = extract_header_item(request, "Referer");
-    if (referer != NULL)
-        result->referer = referer;
+    result->referer = extract_header_item(request, "Referer");
 
     // Extract keep-alive
     char *keep_alive = extract_header_item(request, "Connection");
